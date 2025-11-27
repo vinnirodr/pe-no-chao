@@ -241,7 +241,7 @@ async function analyzeText() {
     animateLoadingSteps();
 
     try {
-        const resp = await fetch("http://localhost:3001/analisar", {
+        const resp = await fetch("https://proud-exploration-production-1034.up.railway.app/analisar", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ texto: text })
