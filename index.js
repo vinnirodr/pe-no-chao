@@ -7,6 +7,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Rota GET para abrir no navegador
+app.get("/", (req, res) => {
+    res.send("API Pé-no-Chão está rodando! 🚀");
+});
+
 app.post("/analisar", async (req, res) => {
     try {
         const { texto } = req.body;
@@ -56,6 +61,7 @@ Responda em JSON:
     }
 });
 
+// Porta dinâmica do Railway
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`API rodando na porta ${PORT} 🔥`);
