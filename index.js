@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -6,59 +7,28 @@ const axios = require('axios');
 
 const TruthTableGenerator = require('./logic/TruthTableGenerator');
 const FactChecker = require('./services/FactChecker');
-const { pool, initDb } = require('./db');
+const analyzeWithGPT = require('./utils/gptAnalyzer');
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Middlewares
 app.use(cors());
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());
 
-// Services
 const generator = new TruthTableGenerator();
 const factChecker = new FactChecker();
 
-// NLP endpoint (Python API ou outro serviço)
-const NLP_API_URL = process.env.NLP_API_URL || 'http://localhost:5000';
-
-// Inicializa o banco
-initDb();
-
 /* -----------------------------------------------------------
-   💬 Veredito baseado nas fontes do Perplexity (campo factual)
-------------------------------------------------------------- */
-function gerarVereditoFontes(nlpData) {
-    if (!nlpData || !nlpData.factual) {
-        return 'As fontes consultadas não foram suficientes para determinar verdade ou falsidade.';
-    }
-
-    if (nlpData.factual === 'falso') {
-        return 'De acordo com as fontes consultadas (Perplexity), a conclusão é falsa.';
-    }
-
-    if (nlpData.factual === 'verdadeiro') {
-        return 'De acordo com as fontes consultadas (Perplexity), a conclusão é verdadeira.';
-    }
-
-    return 'Não foi possível determinar a veracidade da conclusão com base nas fontes consultadas.';
-}
-
-/* -----------------------------------------------------------
-   🔵 Health check
+   🔵 Health
 ------------------------------------------------------------- */
 app.get('/', (req, res) => {
-    res.json({ message: 'Pé no Chão Backend API is running!' });
-});
-
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ message: 'Pé no Chão Backend API is running — no DB mode!' });
 });
 
 /* -----------------------------------------------------------
-   🔍 Validação lógica pura
+   🔍 Validação Lógica
 ------------------------------------------------------------- */
 app.post('/api/v1/validate-logic', (req, res) => {
     const { premises, conclusion } = req.body;
@@ -72,182 +42,75 @@ app.post('/api/v1/validate-logic', (req, res) => {
 });
 
 /* -----------------------------------------------------------
-   🔎 Fact-check individual de uma premissa
+   🔎 Fact-check
 ------------------------------------------------------------- */
 app.post('/api/v1/fact-check', async (req, res) => {
     const { premise } = req.body;
 
     if (!premise) {
-        return res.status(400).json({ error: 'Missing premise text' });
+        return res.status(400).json({ error: 'Missing premise' });
     }
 
     try {
         const result = await factChecker.verify(premise);
         res.json(result);
-    } catch (error) {
-        console.error('Fact-check Error:', error.message);
-        res.status(500).json({ error: 'Internal Server Error', details: error.message });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Fact-check error', details: err.message });
     }
 });
 
 /* -----------------------------------------------------------
-   🧠 Análise completa (NLP + lógica + fact-check + veredito)
+   🧠 Análise completa (GPT + lógica + fact-check)
 ------------------------------------------------------------- */
 app.post('/api/v1/analyses', async (req, res) => {
     const { text } = req.body;
 
-    if (!text || text.length < 10) {
-        return res.status(400).json({ error: 'Text must be at least 10 characters long' });
+    if (!text) {
+        return res.status(400).json({ error: 'Missing text' });
     }
 
     try {
-        console.log(`Analyzing text: ${text.substring(0, 80)}...`);
+        // 1. GPT extrai premissas e conclusão + analisa
+        const gptData = await analyzeWithGPT(text);
 
-        /* -----------------------
-           1. NLP Extraction
-        ------------------------ */
-        let nlpData;
+        const premises = gptData.premises.map(p => p.text);
+        const conclusion = gptData.conclusion.text;
 
-        try {
-            const nlpRes = await axios.post(`${NLP_API_URL}/analyze`, { text });
-            nlpData = nlpRes.data;
-        } catch (e) {
-            console.warn('⚠ NLP API não respondeu — usando fallback simples.', e.message);
+        // 2. lógica
+        const logicResult = generator.validate(premises, conclusion);
 
-            // Fallback básico para não quebrar a API caso o serviço NLP esteja fora
-            nlpData = {
-                premises: [{ text }],
-                conclusion: { text: 'Conclusão não identificada automaticamente (fallback).' },
-                logical_structure: 'desconhecido',
-                factual: 'inconclusivo'
-            };
-        }
-
-        // Garantir que premissas exista e seja array
-        if (!Array.isArray(nlpData.premises) || nlpData.premises.length === 0) {
-            nlpData.premises = [{ text }];
-        }
-
-        /* -----------------------
-           2. Logic Validation
-        ------------------------ */
-        const logicResult = generator.validate(
-            nlpData.premises.map(p => p.text),
-            nlpData.conclusion ? nlpData.conclusion.text : 'Unknown'
+        // 3. fact-check paralelo
+        const factCheck = await Promise.all(
+            premises.map(p => factChecker.verify(p))
         );
 
-        /* -----------------------
-           3. Fact Checking (paralelo)
-        ------------------------ */
-        const factCheckResults = await Promise.all(
-            nlpData.premises.map(p => factChecker.verify(p.text))
-        );
+        // 4. define status
+        const allVerified = factCheck.every(x => x.verified);
 
-        /* -----------------------
-           4. Overall Assessment
-        ------------------------ */
-        const allPremisesVerified = factCheckResults.every(r => r.verified);
-        let assessment = 'SUSPEITO';
+        let assessment = "SUSPEITO";
+        if (logicResult.isValid && allVerified) assessment = "CONFIÁVEL";
+        else if (!logicResult.isValid && allVerified) assessment = "SUSPEITO (Salto Lógico)";
+        else if (!allVerified) assessment = "INCONCLUSIVO";
 
-        if (logicResult.isValid && allPremisesVerified) {
-            assessment = 'CONFIÁVEL';
-        } else if (!logicResult.isValid && allPremisesVerified) {
-            assessment = 'SUSPEITO (Salto Lógico)';
-        } else if (!allPremisesVerified) {
-            assessment = 'INCONCLUSIVO / FALSO';
-        }
-
-        /* -----------------------
-           4.5 Veredito com base nas fontes (Perplexity)
-        ------------------------ */
-        const vereditoFontes = gerarVereditoFontes(nlpData);
-
-        /* -----------------------
-           5. Persistência em banco
-        ------------------------ */
-        const insertQuery = `
-            INSERT INTO analyses (
-                input_text,
-                premises,
-                conclusion,
-                validity,
-                result_type,
-                fact_check_results,
-                overall_assessment
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, created_at
-        `;
-
-        const dbRes = await pool.query(insertQuery, [
-            text,
-            JSON.stringify(nlpData.premises),
-            JSON.stringify(nlpData.conclusion),
-            logicResult.isValid,
-            nlpData.logical_structure || null,
-            JSON.stringify(factCheckResults),
-            assessment
-        ]);
-
-        /* -----------------------
-           6. Resposta final da API
-        ------------------------ */
+        // 5. Retorno limpo
         res.json({
-            id: dbRes.rows[0].id,
-            created_at: dbRes.rows[0].created_at,
             input: text,
-            nlp: nlpData,
+            gpt: gptData,
             logic: logicResult,
-            fact_check: factCheckResults,
-            assessment,
-            veredito_fontes: vereditoFontes
+            fact_check: factCheck,
+            assessment
         });
 
-    } catch (error) {
-        console.error('Analysis Error:', error.message);
-        res.status(500).json({
-            error: 'Internal Server Error',
-            details: error.message
-        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Analysis error', details: err.message });
     }
 });
 
 /* -----------------------------------------------------------
-   📊 Últimas análises
-------------------------------------------------------------- */
-app.get('/api/v1/analyses', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM analyses ORDER BY created_at DESC LIMIT 10');
-        res.json(result.rows);
-    } catch (error) {
-        console.error('DB Error (/analyses):', error.message);
-        res.status(500).json({ error: 'Database Error' });
-    }
-});
-
-/* -----------------------------------------------------------
-   📈 Estatísticas
-------------------------------------------------------------- */
-app.get('/api/v1/stats', async (req, res) => {
-    try {
-        const totalRes = await pool.query('SELECT COUNT(*) FROM analyses');
-        const suspectRes = await pool.query(
-            "SELECT COUNT(*) FROM analyses WHERE overall_assessment LIKE '%SUSPEITO%'"
-        );
-
-        res.json({
-            total: Number(totalRes.rows[0].count),
-            suspect: Number(suspectRes.rows[0].count)
-        });
-    } catch (error) {
-        console.error('DB Error (/stats):', error.message);
-        res.status(500).json({ error: 'Database Error' });
-    }
-});
-
-/* -----------------------------------------------------------
-   🚀 Start Server
+   🚀 Start server
 ------------------------------------------------------------- */
 app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    console.log(`Server running on port ${port} (NO DB MODE)`);
 });
