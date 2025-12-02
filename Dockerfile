@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:18
 
 WORKDIR /app
 
@@ -8,8 +8,6 @@ RUN npm install --production
 
 COPY . .
 
-ENV PORT=3001
-
 EXPOSE 3001
 
-CMD ["node", "index.js"]
+CMD ["npm", "start"]
