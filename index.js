@@ -1,47 +1,76 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const axios = require('axios');
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const morgan = require("morgan");
+const axios = require("axios");
 
-const TruthTableGenerator = require('./logic/TruthTableGenerator');
-const FactChecker = require('./services/FactChecker');
+const TruthTableGenerator = require("./logic/TruthTableGenerator");
+const FactChecker = require("./services/FactChecker");
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Middlewares
-app.use(cors());
+/* -----------------------------------------------------------
+   🌍 CORS — Libera o frontend do Railway + localhost
+------------------------------------------------------------- */
+const allowedOrigins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://pe-no-chao-frontend-production.up.railway.app"
+];
+
+app.use(cors({
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true); // curl, Postman etc.
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        console.warn("🚫 CORS bloqueou origem:", origin);
+        return callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+app.options("*", cors()); // Preflight OK
+
+/* -----------------------------------------------------------
+   🔧 Middlewares
+------------------------------------------------------------- */
 app.use(helmet());
-app.use(morgan('dev'));
+app.use(morgan("dev"));
 app.use(express.json());
 
-// Services
+/* -----------------------------------------------------------
+   🧠 Services
+------------------------------------------------------------- */
 const generator = new TruthTableGenerator();
 const factChecker = new FactChecker();
 
-// NLP endpoint
-const NLP_API_URL = process.env.NLP_API_URL || 'http://localhost:5000';
+/* -----------------------------------------------------------
+   🔌 NLP endpoint
+------------------------------------------------------------- */
+const NLP_API_URL = process.env.NLP_API_URL || "http://localhost:5000";
 
 /* -----------------------------------------------------------
    🔵 Health check
 ------------------------------------------------------------- */
-app.get('/', (req, res) => {
-    res.json({ message: 'Pé no Chão Backend API is running!' });
+app.get("/", (req, res) => {
+    res.json({ message: "Pé no Chão Backend API is running!" });
 });
 
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get("/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 /* -----------------------------------------------------------
    🔍 Validação lógica pura
 ------------------------------------------------------------- */
-app.post('/api/v1/validate-logic', (req, res) => {
+app.post("/api/v1/validate-logic", (req, res) => {
     const { premises, conclusion } = req.body;
 
     if (!premises || !conclusion) {
-        return res.status(400).json({ error: 'Missing premises or conclusion' });
+        return res.status(400).json({ error: "Missing premises or conclusion" });
     }
 
     const result = generator.validate(premises, conclusion);
@@ -51,30 +80,30 @@ app.post('/api/v1/validate-logic', (req, res) => {
 /* -----------------------------------------------------------
    🔎 Fact-check individual de uma premissa
 ------------------------------------------------------------- */
-app.post('/api/v1/fact-check', async (req, res) => {
+app.post("/api/v1/fact-check", async (req, res) => {
     const { premise } = req.body;
 
     if (!premise) {
-        return res.status(400).json({ error: 'Missing premise text' });
+        return res.status(400).json({ error: "Missing premise text" });
     }
 
     try {
         const result = await factChecker.verify(premise);
         res.json(result);
     } catch (error) {
-        console.error('Fact-check Error:', error.message);
-        res.status(500).json({ error: 'Internal Server Error', details: error.message });
+        console.error("Fact-check Error:", error.message);
+        res.status(500).json({ error: "Internal Server Error", details: error.message });
     }
 });
 
 /* -----------------------------------------------------------
    🧠 Análise completa (NLP + lógica + fact-check)
 ------------------------------------------------------------- */
-app.post('/api/v1/analyses', async (req, res) => {
+app.post("/api/v1/analyses", async (req, res) => {
     const { text } = req.body;
 
     if (!text || text.length < 10) {
-        return res.status(400).json({ error: 'Text must be at least 10 characters long' });
+        return res.status(400).json({ error: "Text must be at least 10 characters long" });
     }
 
     try {
@@ -86,12 +115,12 @@ app.post('/api/v1/analyses', async (req, res) => {
             const nlpRes = await axios.post(`${NLP_API_URL}/analyze`, { text });
             nlpData = nlpRes.data;
         } catch (e) {
-            console.warn('⚠ NLP API não respondeu — usando fallback simples.', e.message);
+            console.warn("⚠ NLP API não respondeu — usando fallback simples.", e.message);
             nlpData = {
                 premises: [{ text }],
-                conclusion: { text: 'Conclusão não identificada automaticamente (fallback).' },
-                logical_structure: 'desconhecido',
-                factual: 'inconclusivo'
+                conclusion: { text: "Conclusão não identificada automaticamente (fallback)." },
+                logical_structure: "desconhecido",
+                factual: "inconclusivo"
             };
         }
 
@@ -102,7 +131,7 @@ app.post('/api/v1/analyses', async (req, res) => {
         // Logic validation
         const logicResult = generator.validate(
             nlpData.premises.map(p => p.text),
-            nlpData.conclusion ? nlpData.conclusion.text : 'Unknown'
+            nlpData.conclusion ? nlpData.conclusion.text : "Unknown"
         );
 
         // Fact checking
@@ -112,14 +141,14 @@ app.post('/api/v1/analyses', async (req, res) => {
 
         // Overall assessment
         const allPremisesVerified = factCheckResults.every(r => r.verified);
-        let assessment = 'SUSPEITO';
+        let assessment = "SUSPEITO";
 
         if (logicResult.isValid && allPremisesVerified) {
-            assessment = 'CONFIÁVEL';
+            assessment = "CONFIÁVEL";
         } else if (!logicResult.isValid && allPremisesVerified) {
-            assessment = 'SUSPEITO (Salto Lógico)';
+            assessment = "SUSPEITO (Salto Lógico)";
         } else if (!allPremisesVerified) {
-            assessment = 'INCONCLUSIVO / FALSO';
+            assessment = "INCONCLUSIVO / FALSO";
         }
 
         // Final response
@@ -132,9 +161,9 @@ app.post('/api/v1/analyses', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Analysis Error:', error.message);
+        console.error("Analysis Error:", error.message);
         res.status(500).json({
-            error: 'Internal Server Error',
+            error: "Internal Server Error",
             details: error.message
         });
     }
