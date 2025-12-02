@@ -59,7 +59,7 @@ app.post('/api/v1/analyses', async (req, res) => {
         // 2. Análise lógica
         const logicResult = generator.validate(formalPremises, formalConclusion);
 
-        // 3. "Confiabilidade" com GPT simulando análise baseada em fontes
+        // 3. Confiabilidade com GPT baseado em fontes
         const newsReliability = await Promise.all(
             gptData.premises.map(p => evaluateReliability(p.natural))
         );
@@ -79,10 +79,11 @@ app.post('/api/v1/analyses', async (req, res) => {
             verdict = "FALSO OU ENGANOSO";
         }
 
-        // 5. Resposta final
+        // 5. Resposta final (AGORA COM PROPOSITIONS)
         res.json({
             input: text,
             gpt: gptData,
+            propositions: gptData.propositions,
             logic: logicResult,
             noticias: newsReliability,
             confiabilidade_media: meanReliability,

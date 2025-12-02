@@ -6,16 +6,16 @@ const client = new OpenAI({
 
 async function analyzeWithGPT(text) {
     const prompt = `
-Você é um analisador lógico formal.
+Você é um especialista em lógica proposicional.
 
-Receba o seguinte argumento e retorne APENAS JSON válido com o seguinte formato:
+Receba o argumento abaixo e retorne APENAS JSON válido, seguindo exatamente este formato:
 
 {
   "premises": [
-    { "label": "P", "natural": "", "formal": "" },
-    { "label": "Q", "natural": "", "formal": "" }
+    { "label": "P", "natural": "", "formal": "", "tipo": "" },
+    { "label": "Q", "natural": "", "formal": "", "tipo": "" }
   ],
-  "conclusion": { "label": "C", "natural": "", "formal": "" },
+  "conclusion": { "label": "C", "natural": "", "formal": "", "tipo": "" },
   "propositions": {
     "P": "",
     "Q": "",
@@ -23,12 +23,13 @@ Receba o seguinte argumento e retorne APENAS JSON válido com o seguinte formato
   }
 }
 
-Regras:
-1. "natural" = frase original do argumento.
-2. "formal" = tradução para lógica proposicional (ex: "P", "Q", "(P -> Q)", "(P ∧ Q)").
-3. Use no máximo 3 premissas.
-4. Não invente nada que não esteja no texto.
-5. Sempre devolva JSON puro.
+REGRAS IMPORTANTES:
+1. "tipo" pode ser: "simples", "condicional", "conjunção", "disjunção", "bicondicional", "negação".
+2. "formal" deve usar símbolos lógicos (→, ∧, ∨, ¬, ↔).
+3. Premissas devem ser extraídas SOMENTE do texto — não invente.
+4. Use no máximo 3 premissas.
+5. SEMPRE retornar JSON puro — sem explicações extras.
+6. "propositions" deve mapear label -> frase natural correspondente.
 
 Argumento:
 ${text}
@@ -45,7 +46,7 @@ ${text}
     try {
         return JSON.parse(raw);
     } catch (err) {
-        console.error("Erro ao parsear JSON do GPT:", raw);
+        console.error("❌ Erro ao parsear JSON do GPT:", raw);
         throw new Error("GPT returned invalid JSON");
     }
 }
