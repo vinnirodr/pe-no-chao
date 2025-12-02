@@ -1,77 +1,142 @@
-class TruthTableGenerator {
-    /**
-     * Validates if the Conclusion necessarily follows from the Premises.
-     * Checks the implication: (P1 AND P2 AND ... Pn) -> Conclusion
-     * 
-     * @param {Array} premises - Array of premise objects or strings
-     * @param {Object|string} conclusion - Conclusion object or string
-     * @returns {Object} { isValid, truthTable, counterexamples }
-     */
-    validate(premises, conclusion) {
-        const numPremises = premises.length;
-        // We have N premises + 1 conclusion = N+1 variables
-        // However, for the truth table of the implication (P1...Pn)->C, 
-        // we treat each premise as an atomic variable and the conclusion as another.
-        // Total variables = numPremises + 1
+const Parser = require("./Parser");
 
-        const totalVars = numPremises + 1;
-        const numRows = Math.pow(2, totalVars);
+class TruthTableGenerator {
+    constructor() {
+        this.parser = new Parser();
+    }
+
+    /**
+     * premisesFormal: array de fórmulas, ex: ["(P -> Q)", "P"]
+     * conclusionFormal: string, ex: "Q"
+     */
+    validate(premisesFormal, conclusionFormal) {
+        if (!Array.isArray(premisesFormal) || premisesFormal.length === 0) {
+            throw new Error("At least one premise is required");
+        }
+        if (!conclusionFormal) {
+            throw new Error("Conclusion is required");
+        }
+
+        // 1. Parse das fórmulas
+        const premiseASTs = premisesFormal.map((f) => this.parser.parse(f));
+        const conclusionAST = this.parser.parse(conclusionFormal);
+
+        // 2. Coletar átomos (P, Q, R...)
+        const atomSet = new Set();
+        for (const ast of [...premiseASTs, conclusionAST]) {
+            this.collectAtoms(ast, atomSet);
+        }
+        const atoms = Array.from(atomSet).sort(); // [ "P", "Q", ... ]
+
+        // 3. Gerar tabela verdade
         const truthTable = [];
         const counterexamples = [];
-        let isValid = true;
 
-        for (let i = 0; i < numRows; i++) {
-            // Generate truth values for this row
-            // We map bits to variables: 
-            // Bit 0: Conclusion
-            // Bit 1..N: Premises
+        const totalRows = 1 << atoms.length; // 2^n
 
-            const rowValues = {};
-            let allPremisesTrue = true;
+        for (let mask = 0; mask < totalRows; mask++) {
+            const assignment = {};
 
-            // Extract values for premises
-            for (let p = 0; p < numPremises; p++) {
-                // Shift right by (p+1) because bit 0 is conclusion
-                const val = (i >> (p + 1)) & 1;
-                rowValues[`P${p + 1}`] = val === 1;
-                if (val === 0) allPremisesTrue = false;
-            }
+            atoms.forEach((name, i) => {
+                assignment[name] = !!(mask & (1 << i));
+            });
 
-            // Extract value for conclusion
-            const conclusionVal = (i & 1) === 1;
-            rowValues['C'] = conclusionVal;
+            const premiseValues = premiseASTs.map((ast) =>
+                this.evaluate(ast, assignment)
+            );
+            const conclusionValue = this.evaluate(conclusionAST, assignment);
 
-            // Evaluate Implication: (P1 & ... & Pn) -> C
-            // Implication is FALSE only if (True -> False)
-            const implication = !(allPremisesTrue && !conclusionVal);
+            const allPremisesTrue = premiseValues.every((v) => v === true);
+            const validHere = !allPremisesTrue || conclusionValue === true;
 
-            const rowResult = {
-                ...rowValues,
-                'ALL_PREMISES': allPremisesTrue,
-                'VALID': implication
+            const row = {
+                ...assignment,
+                premises: premiseValues,
+                conclusion: conclusionValue,
+                ALL_PREMISES: allPremisesTrue,
+                VALID: validHere,
             };
 
-            truthTable.push(rowResult);
+            truthTable.push(row);
 
-            if (!implication) {
-                isValid = false;
+            if (allPremisesTrue && !conclusionValue) {
                 counterexamples.push({
-                    scenario: Object.entries(rowValues)
-                        .map(([k, v]) => `${k}=${v}`)
-                        .join(', '),
-                    explanation: "Premises are TRUE but Conclusion is FALSE."
+                    assignment: { ...assignment },
+                    premises: premiseValues,
+                    conclusion: conclusionValue,
+                    explanation:
+                        "Premissas verdadeiras e conclusão falsa neste cenário.",
                 });
             }
         }
 
+        const isValid = counterexamples.length === 0;
+
         return {
             isValid,
+            atoms,
             truthTable,
             counterexamples,
             explanation: isValid
-                ? "Valid argument structure."
-                : "Invalid argument structure. It is possible for the premises to be true and the conclusion false."
+                ? "Argumento válido: não há caso em que todas as premissas sejam verdadeiras e a conclusão falsa."
+                : "Argumento inválido: existe pelo menos um caso em que todas as premissas são verdadeiras e a conclusão é falsa.",
         };
+    }
+
+    collectAtoms(ast, set) {
+        switch (ast.type) {
+            case "var":
+                set.add(ast.name);
+                break;
+            case "not":
+                this.collectAtoms(ast.operand, set);
+                break;
+            case "and":
+            case "or":
+            case "imp":
+            case "iff":
+                this.collectAtoms(ast.left, set);
+                this.collectAtoms(ast.right, set);
+                break;
+        }
+    }
+
+    evaluate(ast, env) {
+        switch (ast.type) {
+            case "var":
+                return !!env[ast.name];
+
+            case "not":
+                return !this.evaluate(ast.operand, env);
+
+            case "and":
+                return (
+                    this.evaluate(ast.left, env) &&
+                    this.evaluate(ast.right, env)
+                );
+
+            case "or":
+                return (
+                    this.evaluate(ast.left, env) ||
+                    this.evaluate(ast.right, env)
+                );
+
+            case "imp": {
+                const left = this.evaluate(ast.left, env);
+                const right = this.evaluate(ast.right, env);
+                // P -> Q ≡ ¬P ∨ Q
+                return !left || right;
+            }
+
+            case "iff": {
+                const left = this.evaluate(ast.left, env);
+                const right = this.evaluate(ast.right, env);
+                return left === right;
+            }
+
+            default:
+                throw new Error(`Unknown AST node type: ${ast.type}`);
+        }
     }
 }
 

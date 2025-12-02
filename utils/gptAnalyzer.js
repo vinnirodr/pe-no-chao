@@ -4,8 +4,13 @@ const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
+/**
+ * Recebe um texto em linguagem natural e devolve:
+ * - premissas (natural + formal)
+ * - conclusão (natural + formal)
+ * - átomos proposicionais (P, Q, R...)
+ */
 async function analyzeWithGPT(text) {
-
     const prompt = `
 Você é um analisador lógico formal. Dado o texto abaixo:
 
@@ -16,8 +21,15 @@ Você é um analisador lógico formal. Dado o texto abaixo:
    - "Se X então Y" → (P -> Q)
    - "X e Y" → (P ∧ Q)
    - "X ou Y" → (P ∨ Q)
-   - "Não X" → ¬P
-5. Retorne SOMENTE um JSON válido no formato:
+   - "Não X" / "É falso que X" → ¬P
+
+Use SEMPRE:
+- "->" para implicação
+- "∧" para E
+- "∨" para OU
+- "¬" para NÃO
+
+Retorne SOMENTE um JSON VÁLIDO, no formato EXATO:
 
 {
   "premises": [
@@ -33,8 +45,8 @@ Você é um analisador lógico formal. Dado o texto abaixo:
   }
 }
 
-NÃO explique nada. NÃO escreva comentários.
-NÃO invente fatos. Apenas transforme o texto em lógica proposicional.
+NÃO explique nada. NÃO escreva comentários. NÃO coloque texto fora do JSON.
+NÃO invente fatos que não estejam no texto.
 
 Texto: ${text}
 `;
@@ -47,7 +59,12 @@ Texto: ${text}
 
     const raw = response.choices[0].message.content.trim();
 
-    return JSON.parse(raw);
+    try {
+        return JSON.parse(raw);
+    } catch (err) {
+        console.error("Erro ao parsear JSON do GPT:", raw);
+        throw new Error("GPT returned invalid JSON");
+    }
 }
 
 module.exports = analyzeWithGPT;

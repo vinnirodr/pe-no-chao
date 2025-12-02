@@ -59,9 +59,8 @@ app.post('/api/v1/fact-check', async (req, res) => {
         res.status(500).json({ error: 'Fact-check error', details: err.message });
     }
 });
-
 /* -----------------------------------------------------------
-   🧠 Análise completa (GPT + lógica + fact-check)
+   🧠 Análise completa (GPT + lógica formal + fact-check)
 ------------------------------------------------------------- */
 app.post('/api/v1/analyses', async (req, res) => {
     const { text } = req.body;
@@ -71,35 +70,40 @@ app.post('/api/v1/analyses', async (req, res) => {
     }
 
     try {
-        // 1. GPT extrai premissas e conclusão + analisa
+        // 1. GPT: extrai premissas, conclusão e fórmulas formais
         const gptData = await analyzeWithGPT(text);
 
-        const premises = gptData.premises.map(p => p.text);
-        const conclusion = gptData.conclusion.text;
+        const formalPremises = gptData.premises.map(p => p.formal);
+        const formalConclusion = gptData.conclusion.formal;
 
-        // 2. lógica
-        const logicResult = generator.validate(premises, conclusion);
+        // 2. Lógica formal com tabela verdade
+        const logicResult = generator.validate(formalPremises, formalConclusion);
 
-        // 3. fact-check paralelo
+        // 3. Fact-check (em cima das premissas NATURAIS)
         const factCheck = await Promise.all(
-            premises.map(p => factChecker.verify(p))
+            gptData.premises.map(p => factChecker.verify(p.natural))
         );
 
-        // 4. define status
         const allVerified = factCheck.every(x => x.verified);
 
-        let assessment = "SUSPEITO";
-        if (logicResult.isValid && allVerified) assessment = "CONFIÁVEL";
-        else if (!logicResult.isValid && allVerified) assessment = "SUSPEITO (Salto Lógico)";
-        else if (!allVerified) assessment = "INCONCLUSIVO";
+        // 4. Veredito geral
+        let verdict = "SUSPEITO";
 
-        // 5. Retorno limpo
+        if (logicResult.isValid && allVerified) {
+            verdict = "CONFIÁVEL";
+        } else if (!logicResult.isValid && allVerified) {
+            verdict = "SUSPEITO (salto lógico)";
+        } else if (!allVerified) {
+            verdict = "INCONCLUSIVO";
+        }
+
+        // 5. Resposta organizada
         res.json({
             input: text,
             gpt: gptData,
             logic: logicResult,
             fact_check: factCheck,
-            assessment
+            verdict
         });
 
     } catch (err) {
