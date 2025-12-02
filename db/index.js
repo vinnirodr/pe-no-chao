@@ -3,7 +3,10 @@ const fs = require('fs');
 const path = require('path');
 
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/penochao'
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
 // Initialize DB
