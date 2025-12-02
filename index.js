@@ -53,15 +53,32 @@ app.post('/api/v1/analyses', async (req, res) => {
         // 1. GPT extrai premissas, conclusão e fórmulas
         const gptData = await analyzeWithGPT(text);
 
-        const formalPremises = gptData.premises.map(p => p.formal);
-        const formalConclusion = gptData.conclusion.formal;
+        // protege premissas (garante array)
+        const premises = Array.isArray(gptData.premises) ? gptData.premises : [];
+
+        // protege proposições (garante objeto)
+        const propositions = gptData.propositions || {};
+
+        // extrai forma lógica das premissas
+        const formalPremises = premises.map(p => p.formal || null);
+
+        // protege conclusão
+        const formalConclusion = gptData.conclusion?.formal || null;
 
         // 2. Análise lógica
-        const logicResult = generator.validate(formalPremises, formalConclusion);
+        let logicResult = {
+            isValid: false,
+            steps: [],
+            message: "Sem conclusão — não é possível validar argumento lógico"
+        };
 
-        // 3. Confiabilidade com GPT baseado em fontes
+        if (formalConclusion !== null) {
+            logicResult = generator.validate(formalPremises, formalConclusion);
+        }
+
+        // 3. Confiabilidade das premissas com GPT
         const newsReliability = await Promise.all(
-            gptData.premises.map(p => evaluateReliability(p.natural))
+            premises.map(p => evaluateReliability(p.natural))
         );
 
         const meanReliability =
@@ -79,11 +96,12 @@ app.post('/api/v1/analyses', async (req, res) => {
             verdict = "FALSO OU ENGANOSO";
         }
 
-        // 5. Resposta final (AGORA COM PROPOSITIONS)
+        // 5. Resposta final
         res.json({
             input: text,
             gpt: gptData,
-            propositions: gptData.propositions,
+            propositions,
+            premises, // devolve a lista processada
             logic: logicResult,
             noticias: newsReliability,
             confiabilidade_media: meanReliability,
@@ -91,7 +109,7 @@ app.post('/api/v1/analyses', async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error("❌ ERROR:", err);
         res.status(500).json({ error: 'Analysis error', details: err.message });
     }
 });
