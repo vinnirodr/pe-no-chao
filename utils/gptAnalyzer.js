@@ -4,51 +4,34 @@ const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-/**
- * Recebe um texto em linguagem natural e devolve:
- * - premissas (natural + formal)
- * - conclusão (natural + formal)
- * - átomos proposicionais (P, Q, R...)
- */
 async function analyzeWithGPT(text) {
     const prompt = `
-Você é um analisador lógico formal. Dado o texto abaixo:
+Você é um analisador lógico formal.
 
-1. Extraia até 3 premissas.
-2. Extraia a conclusão.
-3. Identifique as proposições atômicas (P, Q, R…).
-4. Converta cada frase em lógica proposicional:
-   - "Se X então Y" → (P -> Q)
-   - "X e Y" → (P ∧ Q)
-   - "X ou Y" → (P ∨ Q)
-   - "Não X" / "É falso que X" → ¬P
-
-Use SEMPRE:
-- "->" para implicação
-- "∧" para E
-- "∨" para OU
-- "¬" para NÃO
-
-Retorne SOMENTE um JSON VÁLIDO, no formato EXATO:
+Receba o seguinte argumento e retorne APENAS JSON válido com o seguinte formato:
 
 {
   "premises": [
-    { "label": "P1", "natural": "", "formal": "" },
-    { "label": "P2", "natural": "", "formal": "" }
+    { "label": "P", "natural": "", "formal": "" },
+    { "label": "Q", "natural": "", "formal": "" }
   ],
   "conclusion": { "label": "C", "natural": "", "formal": "" },
-
-  "atoms": {
+  "propositions": {
     "P": "",
     "Q": "",
-    "R": ""
+    "C": ""
   }
 }
 
-NÃO explique nada. NÃO escreva comentários. NÃO coloque texto fora do JSON.
-NÃO invente fatos que não estejam no texto.
+Regras:
+1. "natural" = frase original do argumento.
+2. "formal" = tradução para lógica proposicional (ex: "P", "Q", "(P -> Q)", "(P ∧ Q)").
+3. Use no máximo 3 premissas.
+4. Não invente nada que não esteja no texto.
+5. Sempre devolva JSON puro.
 
-Texto: ${text}
+Argumento:
+${text}
 `;
 
     const response = await client.chat.completions.create({
